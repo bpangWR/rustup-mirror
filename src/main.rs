@@ -96,12 +96,43 @@ fn main() {
                 .help("Keep how many days of nightly toolchains, e.g. 365")
                 .takes_value(true),
         )
+        .arg(
+            Arg::with_name("targets")
+                .short("t")
+                .long("targets")
+                .value_name("choosen_targets")
+                .help("only download packages for choosen targets, e.g x86_64,i686")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("packages")
+                .short("p")
+                .long("packages")
+                .value_name("choosen_packages")
+                .help("only download choosen packages, e.g cargo,rustc")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("date")
+                .short("d")
+                .long("date")
+                .value_name("build_date")
+                .help("specify the packages's build date, e.g 2020-09-16")
+                .takes_value(true),
+        )
         .get_matches();
 
     let orig_path = args.value_of("orig").unwrap_or("./orig");
     let mirror_path = args.value_of("mirror").unwrap_or("./mirror");
     let mirror_url = args.value_of("url").unwrap_or("http://127.0.0.1:8000");
     let gc_days = args.value_of("gc");
+    let choosen_targets = args.value_of("targets");
+    let choosen_packages = args.value_of("packages");
+    let build_date = args.value_of("date");
+
+    println!("Choosen targets: {:?}", choosen_targets);
+    println!("Choosen packages: {:?}", choosen_packages);
+    println!("Build date: {:?}", build_date);
 
     let mut all_targets = HashSet::new();
 
@@ -140,9 +171,16 @@ fn main() {
     // Fetch rust components
     let channels = ["stable", "beta", "nightly"];
     for channel in channels.iter() {
-        let name = format!("dist/channel-rust-{}.toml", channel);
+        let name = match build_date {
+            Some(date) => format!("dist/{}/channel-rust-{}.toml", date, channel),
+            None => format!("dist/channel-rust-{}.toml", channel),
+        };
         let file_path = download(orig_path, &name).unwrap();
-        let sha256_name = format!("dist/channel-rust-{}.toml.sha256", channel);
+
+        let sha256_name = match build_date {
+            Some(date) => format!("dist/{}/channel-rust-{}.toml.sha256", date, channel),
+            None => format!("dist/channel-rust-{}.toml.sha256", channel),
+        };
         let sha256_file_path = download(orig_path, &sha256_name).unwrap();
 
         let mut file = File::open(file_path.clone()).unwrap();
@@ -166,11 +204,29 @@ fn main() {
         );
 
         let pkgs = value["pkg"].as_table_mut().unwrap();
-        let keys: Vec<String> = pkgs.keys().cloned().collect();
+        let mut keys: Vec<String> = pkgs.keys().cloned().collect();
+        println!("original keys {:?}", keys);
+        match choosen_packages {
+            Some(pkgs) => {
+                let pkg_list: Vec<&str> = pkgs.split(",").collect();
+                println!("pkg_list {:?}", pkg_list);
+                keys.retain(|k| pkg_list.iter().any(|p| k.contains(p)))
+            }
+            None => {}
+        }
+        println!("keys {:?}", keys);
         for pkg_name in keys {
             let pkg = pkgs.get_mut(&pkg_name).unwrap().as_table_mut().unwrap();
             let pkg_targets = pkg.get_mut("target").unwrap().as_table_mut().unwrap();
-            let targets: Vec<String> = pkg_targets.keys().cloned().collect();
+            let mut targets: Vec<String> = pkg_targets.keys().cloned().collect();
+            match choosen_targets {
+                Some(tgts) => {
+                    let tgt_list: Vec<&str> = tgts.split(",").collect();
+                    targets.retain(|t| tgt_list.iter().any(|x| t.contains(x)))
+                }
+                None => {}
+            }
+            println!("targets {:?}", targets);
             for target in targets {
                 let pkg_target = pkg_targets
                     .get_mut(&target)
@@ -300,7 +356,7 @@ fn main() {
             println!("Failed to fetch rustup-init for target {}, ignored", target);
         }
     }
-
+    println!("self_update_manifest_path {:?}", self_update_manifest_path);
     copy(
         self_update_manifest_path,
         Path::new(mirror_path).join("rustup/release-stable.toml"),
