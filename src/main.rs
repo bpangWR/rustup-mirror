@@ -120,6 +120,22 @@ fn main() {
                 .help("specify the packages's build date, e.g 2020-09-16")
                 .takes_value(true),
         )
+        .arg(
+            Arg::with_name("channel")
+                .short("c")
+                .long("channel")
+                .value_name("build_channel")
+                .help("choose from beta, nightly and stable")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("filter")
+                .short("f")
+                .long("filter")
+                .value_name("pkg_filter")
+                .help("only download packages match the filter")
+                .takes_value(true),
+        )        
         .get_matches();
 
     let orig_path = args.value_of("orig").unwrap_or("./orig");
@@ -129,10 +145,14 @@ fn main() {
     let choosen_targets = args.value_of("targets");
     let choosen_packages = args.value_of("packages");
     let build_date = args.value_of("date");
+    let choosen_channel = args.value_of("channel");
+    let pkg_filter = args.value_of("filter");
 
     println!("Choosen targets: {:?}", choosen_targets);
     println!("Choosen packages: {:?}", choosen_packages);
+    println!("Choosen channel: {:?}", choosen_channel);    
     println!("Build date: {:?}", build_date);
+    println!("Package filter: {:?}", pkg_filter);
 
     let mut all_targets = HashSet::new();
 
@@ -169,7 +189,15 @@ fn main() {
     }
 
     // Fetch rust components
-    let channels = ["stable", "beta", "nightly"];
+    let mut channels = vec!["stable", "beta", "nightly"];
+    match choosen_channel {
+        Some(chs) => {
+            let ch_list: Vec<&str> = chs.split(",").collect();
+            println!("ch_list {:?}", ch_list);
+            channels.retain(|c| ch_list.iter().any(|c0| c == c0))
+        }
+        None =>  {}
+    }
     for channel in channels.iter() {
         let name = match build_date {
             Some(date) => format!("dist/{}/channel-rust-{}.toml", date, channel),
@@ -245,6 +273,17 @@ fn main() {
                         let file_name = url.path().replace("%20", " ");
                         let file = mirror.join(&file_name[1..]);
 
+                        println!("file_name {:?}", file_name);
+                        match pkg_filter {
+                            Some(filter) => {
+                                if ! file_name.contains(filter) {
+                                    println!("skipped due not matching filter: {:?}", filter);        
+                                    continue;
+                                }
+                            }
+                            None => {}
+                        }
+                        
                         let hash_file = mirror.join(format!("{}.sha256", &file_name[1..]));
                         let hash_file_cont =
                             File::open(hash_file.clone()).ok().and_then(|mut f| {
